@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>PAI最終課題 説明資料</title>
+<style>
+  @page { size: A4; margin: 18mm; }
+  body { font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif; font-size: 10.5pt; line-height: 1.7; color: #000; background: #fff; }
+  h1 { font-size: 16pt; margin: 0 0 1mm; }
+  h2 { font-size: 12pt; margin: 5mm 0 2mm; }
+  h3 { font-size: 10.5pt; margin: 4mm 0 1mm; }
+  p { margin: 1mm 0 2mm; }
+  table { border-collapse: collapse; width: 100%; margin: 2mm 0 3mm; font-size: 9.5pt; }
+  th, td { border: 1px solid #000; padding: 1mm 2mm; text-align: left; vertical-align: top; font-weight: normal; }
+  .figs { display: flex; gap: 3mm; margin: 2mm 6%; }
+  .figs figure { margin: 0; flex: 1; }
+  .figs img { width: 100%; }
+  figcaption { font-size: 9pt; text-align: center; }
+  ul { margin: 1mm 0 2mm; padding-left: 6mm; }
+  .kv td:first-child { white-space: nowrap; }
+  h2, h3 { break-after: avoid; }
+  .figs, .kv { break-inside: avoid; }
+  tr { break-inside: avoid; }
+  .c td:first-child { white-space: nowrap; }
+  .c td + td { text-align: center; }
+  .r { font-size: 8.5pt; }
+  .r { table-layout: fixed; }
+  .r td:nth-child(n+3) { text-align: center; }
+  .keep { break-inside: avoid; }
+  .pb { page-break-before: always; }
+</style>
+</head>
+<body>
+
+<h1>Go2 に後ろ足で立つ動作を強化学習で学習させる</h1>
+<p>Physical AI 応用1講座 最終課題 説明資料　j_shimokawatoko<br>
+コード: GitHub（URL は omnicampus に提出）　動画: YouTube（65秒、等倍速）</p>
+
+<h2>1. 概要と目的</h2>
+<p>四足ロボットの Unitree Go2 に、Genesis 上の強化学習（PPO）で、後ろ足で立ってバランスを保つ動作を学習させた。
+Genesis 公式の Go2 歩行サンプルをもとに、アルゴリズム、ネットワーク、観測、行動は変えず、報酬と終了条件だけを変更した。
+報酬を変えるだけで歩行とは別の動作を学習できるかを確かめるのが目的である。</p>
+
+<h2>2. 使用ツールと学習の設定</h2>
+<table class="kv">
+<tr><td>シミュレータ</td><td>Genesis 1.4.5（Go2 のモデルは Genesis 同梱のもの）</td></tr>
+<tr><td>学習</td><td>PPO（rsl-rl-lib 5.5.2）。Actor と Critic は 3 層の MLP（512-256-128）</td></tr>
+<tr><td>観測（45次元）</td><td>胴体の角速度、胴体から見た重力の向き、速度指令、関節の角度と角速度、前回の行動</td></tr>
+<tr><td>行動（12次元）</td><td>各関節の目標角度。PD 制御でトルクに変換する（50Hz）</td></tr>
+<tr><td>計算機</td><td>MacBook Pro（M1 Pro、16GB）。4096 環境を並列に実行</td></tr>
+</table>
+<p>ベースにしたコードは Genesis 公式の examples/locomotion（Apache-2.0）。上の設定はすべて公式のままである。</p>
+
+<h2>3. 報酬と終了条件</h2>
+<p>報酬は Genesis や rsl-rl の機能ではなく、環境のクラス（src/go2_env.py）に項目ごとの関数として定義している。
+毎ステップ Genesis から胴体の位置・向き・速度、関節の角度、脚のリンクの位置と向きを取得し、各関数で値を計算して、重みを掛けた和を報酬として PPO に渡す。
+公式サンプルにあるのは表の上 6 項目で、それ以外は今回追加した関数である。</p>
+<table class="r">
+<colgroup><col style="width:18%"><col style="width:49%"><col style="width:10%"><col style="width:11.5%"><col style="width:11.5%"></colgroup>
+<thead><tr><td>項目</td><td>使った情報と計算</td><td>公式</td><td>2足立ち</td><td>姿勢修正</td></tr></thead>
+<tr><td>速度の追従（前後・左右）</td><td>胴体の水平速度と指令の差の二乗 e から exp(−e/0.25)</td><td>1.0</td><td>0.5</td><td>0.5</td></tr>
+<tr><td>速度の追従（旋回）</td><td>胴体の鉛直軸まわりの角速度と指令の差から、同様に計算</td><td>0.2</td><td>0.2</td><td>0.2</td></tr>
+<tr><td>上下の速度</td><td>胴体の上下方向の速度の二乗</td><td>−1.0</td><td>−0.2</td><td>−0.2</td></tr>
+<tr><td>行動の変化</td><td>前回と今回の行動（目標角度）の差の二乗和</td><td>−0.005</td><td>−0.01</td><td>−0.01</td></tr>
+<tr><td>胴体の高さを保つ</td><td>（胴体の高さ − 0.30 m）の二乗</td><td>−50</td><td></td><td></td></tr>
+<tr><td>基本姿勢からのずれ</td><td>12 関節の角度と、四つ足の基本姿勢の角度との差の絶対値の和</td><td>−0.1</td><td></td><td></td></tr>
+<tr><td>胴体の起き具合</td><td>胴体から見た重力の向きの前後成分 g<sub>x</sub> から ((1−g<sub>x</sub>)/2)²。水平で 0.25、直立で 1</td><td></td><td>1.0</td><td>5.0</td></tr>
+<tr><td>胴体の高さ</td><td>胴体の高さを 0〜1 に直線で変換（0.30〜0.50 m、姿勢修正では 0.28〜0.42 m）</td><td></td><td>1.0</td><td>0.3</td></tr>
+<tr><td>前足の高さ</td><td>前足のすねのリンクの位置と向きから、0.213 m 先の足先の高さを求め、0〜0.10 m を 0〜1 に変換</td><td></td><td>0.5</td><td>1.0</td></tr>
+<tr><td>股を閉じる</td><td>後ろ足の股関節の角度 θ。加点は 1−|θ|/0.5 rad、罰則は θ²</td><td></td><td></td><td>2.0 / −2.0</td></tr>
+<tr><td>膝を曲げる</td><td>後ろ足の膝関節の角度 θ。加点は −80° に近いほど高いガウス関数、罰則は −69° より伸びた分の二乗</td><td></td><td></td><td>0.8 / −3.0</td></tr>
+<tr><td>足を腰幅に置く</td><td>後ろ足の足先の位置を胴体から見た座標に直し、左右方向の位置 y を使う。加点は |y| が 0.15 m に近いほど高く、罰則は 0.15 m を超えた分の二乗</td><td></td><td></td><td>1.0 / −20</td></tr>
+<tr><td>左右の対称性</td><td>左右の股関節の角度の和と、左右の足先の y の和が、それぞれ 0 に近いほど高い</td><td></td><td></td><td>2.0 / 1.0</td></tr>
+<tr><td>横に傾かない</td><td>胴体から見た重力の向きの左右成分 g<sub>y</sub> が 0 に近いほど高い</td><td></td><td></td><td>0.5</td></tr>
+<tr><td>終了条件</td><td>胴体の傾き（重力の向き）と高さ</td><td>10 度傾く</td><td colspan="2">0.15 m より低い、または横に約 45 度傾く</td></tr>
+<tr><td>学習</td><td></td><td>101 iter<br>約3分</td><td>500 iter<br>約16分</td><td>計 約2000 iter</td></tr>
+</table>
+<ul>
+<li>速度の指令は、公式では前進 0.5 m/s、2足立ちと姿勢修正では 0（その場にとどまる）にした。</li>
+<li>2足立ちでは、四つ足の姿勢に戻そうとする 2 項目を外した。直立に近い姿勢ではオイラー角が不安定になるので、傾きは重力の向きから求めている。
+10 度で終了すると立ち上がる途中で毎回リセットされるので、終了条件も変えた。</li>
+<li>姿勢修正では、2足立ちで後ろ足を大きく開き、関節を可動範囲の端に当てて立っていたので、後ろ足の姿勢の項目を加えた。
+左右の脚は、点数の低いほうの脚で評価している。また、姿勢の加点項目には胴体の起き具合を掛けて、立っているときだけ点が入るようにした。これがないと、しゃがみこんで罰則を避ける動作になった。
+2足立ちのモデルから学習を続けている。</li>
+</ul>
+
+<h2>4. 結果</h2>
+<div class="keep">
+<div class="figs">
+<figure><img src="img/front_walk.png"><figcaption>四足歩行（公式）</figcaption></figure>
+<figure><img src="img/stand_front_before.png"><figcaption>2足立ち</figcaption></figure>
+<figure><img src="img/stand_front_after.png"><figcaption>2足立ち・姿勢修正</figcaption></figure>
+</div>
+<table class="c keep">
+<tr><td></td><td>四足歩行（公式）</td><td>2足立ち</td><td>2足立ち・姿勢修正</td></tr>
+<tr><td>動作</td><td>0.55 m/s で前進</td><td>後ろ足で立つ</td><td>後ろ足で立つ</td></tr>
+<tr><td>後ろ足の間隔</td><td></td><td>0.79 m</td><td>0.30 m</td></tr>
+<tr><td>股の角度（左 / 右）</td><td></td><td>+60°（可動範囲の端）/ −38°</td><td>+2° / −2°</td></tr>
+<tr><td>膝の角度（左 / 右）</td><td></td><td>−48° / −48°（可動範囲の端）</td><td>−88° / −85°</td></tr>
+<tr><td>転倒</td><td>なし</td><td>なし</td><td>なし</td></tr>
+</table>
+</div>
+<p>図はどれも正面から見たもの。関節の角度と足の間隔は、立ち上がった後の 1.5〜5 秒の平均である。</p>
+
+<h3>2足歩行</h3>
+<p>姿勢修正後のモデルに前進の指令を加え、速度への追従、両足での跳躍、片足立ちなどを報酬にして学習させたが、前に歩くようにはならなかった。
+立ち止まったまま前後に揺れる、その場で跳ぶ、片足で立ったまま足を下ろさない、といった動作になった。
+歩くより立っているほうが報酬を得やすかったことと、後ろ足は接地が点に近く片足立ちが不安定なことが原因だと考えている。</p>
+
+<h2>5. 考察・反省点</h2>
+<ul>
+<li>報酬と終了条件を変えただけで、歩行から後ろ足立ちに動作が変わった。立ち方そのものは教えていない。</li>
+<li>報酬が足りないと、関節を可動範囲の端に当てるなど、意図しない方法で点を取る動作になった。結果を見ながら報酬を足す必要があった。</li>
+<li>2足歩行はできなかった。周期的な信号を観測に加える、お手本の動きを与える、といった方法が考えられる。</li>
+<li>確認はシミュレーション上で 1 体を 10〜20 秒動かしただけで、実機や乱数のシードによる違いは調べていない。</li>
+</ul>
+
+<h2>6. 参考</h2>
+<ul>
+<li>Genesis https://github.com/Genesis-Embodied-AI/Genesis（examples/locomotion、Apache License 2.0）</li>
+<li>rsl-rl https://github.com/leggedrobotics/rsl_rl</li>
+<li>講座サンプル「[Genesis] 1時間で4脚ロボットの強化学習の環境構築」</li>
+</ul>
+
+</body>
+</html>

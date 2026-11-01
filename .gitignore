@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+# 学習ログ・動画は大きいので除外（提出用の最終モデルだけ個別に追加する）
+logs/
+videos/
+# 配布資料は公開しない
+最終課題*.pdf
+.claude/
+CLAUDE.md
